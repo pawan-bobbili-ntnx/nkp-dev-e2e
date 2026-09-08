@@ -1,0 +1,22 @@
+# secrets - never
+nkp-e2e.env
+*.env
+# run output (gigabytes) and scratch
+e2e-results/
+exec.log
+.demo-console*
+__pycache__/
+*.pyc
+# claim/freeze STATE - per-cluster, per-PC, regenerated; only the code ships
+instant-cluster/*.conf
+instant-cluster/*.json
+instant-cluster/*.log
+instant-cluster/*-git-bundles/
+instant-cluster/seed-db-*
+instant-cluster/etcd
+instant-cluster/etcdctl
+instant-cluster/etcdutl
+# PR evidence lives on the PRs, not in the framework
+evidence-bundle/
+# demo narration streams describe one lab session; the console/driver code ships, the narration does not
+contrib/recording/streams/

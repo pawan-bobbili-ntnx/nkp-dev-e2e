@@ -1,0 +1,33 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: kommander-upgrade-existing
+description: Row 3 against a supplied below-version cluster - upgrade, land a controller change, prove a re-render cannot revert it
+expected_minutes: 50
+
+env:
+  E2E_CHANGE: kommander@7efd9db8
+
+steps:
+  - group: the cluster you supplied (must be BELOW your CLI's version)
+  - use_existing_cluster
+  - record_nodes:
+      key: nodes_before_upgrade
+
+  - group: the customer's step 1 - nkp upgrade kommander
+  - upgrade_kommander
+
+  - group: land the developer's controller change on the upgraded cluster
+  - deliver_changes:
+      changes:
+        - "${E2E_CHANGE}"
+  - assert_change_running:
+      repo: kommander
+      timeout: 20m
+
+  - group: NO OLD CODE - a kommander upgrade's re-render must not revert it
+  - upgrade_kommander
+
+  - group: CONTAINMENT - none of this touched the node layer
+  - assert_nodes_unchanged:
+      was: nodes_before_upgrade

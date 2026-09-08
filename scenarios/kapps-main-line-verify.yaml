@@ -1,0 +1,26 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: kapps-main-line-verify
+description: The assertions of kapps-main-line against a supplied cluster that already received the main-line delivery (E2E_KUBECONFIG, E2E_KAPPS_DIR)
+expected_minutes: 2
+
+env:
+  E2E_MAIN_REF: "pawan/e2e-demo-main"
+
+steps:
+  - group: the cluster you supplied
+  - use_existing_cluster
+  - group: the content is on the cluster, and it came from the subtree
+  - assert_app_metadata:
+      app: istio-helm
+      contains: "[e2e-demo-main]"
+  - assert_app_metadata:
+      app: istio-helm
+      field: displayName
+      contains: "(e2e-demo-main)"
+  - assert_kapps_app_versions:
+      ref: "${E2E_MAIN_REF}"
+      apps:
+        kommander-ui: "17.319.4"
+        istio-helm: "1.25.0"

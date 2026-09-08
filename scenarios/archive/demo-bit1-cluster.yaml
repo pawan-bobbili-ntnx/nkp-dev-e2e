@@ -1,0 +1,25 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# RECORDING BIT 1 of 3 - run with --keep so the cluster survives for bit 2.
+#   ./run_e2e.py demo-bit1-cluster --keep
+# The kubeconfig path it prints is what bits 2 and 3 need in E2E_KUBECONFIG.
+name: demo-bit1-cluster
+description: Recording bit 1 - a 2.18 cluster from the claim pool
+expected_minutes: 20
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+
+steps:
+  - group: 1 - a 2.18 cluster, two nodes
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+  - pause:
+      message: "2.18 cluster is up - this is the kubeconfig bits 2 and 3 use"

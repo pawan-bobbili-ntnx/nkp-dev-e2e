@@ -1,0 +1,68 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: upgrade-existing-changeset
+description: A supplied cluster already carrying a three-repo change-set is upgraded by a CLI built from those branches; the upgrade must preserve every change
+expected_minutes: 45
+
+# The cluster is supplied (E2E_KUBECONFIG) and ALREADY has the change-set
+# delivered (deliver_changes ran earlier). The upgrade re-renders every
+# platform app from the v2.18.1-dev bundle; the point is that the re-render
+# keeps the developer's changes rather than reverting them.
+#
+# Deliberately absent: assert_chart_refs_changed. It compares chart references
+# before/after the upgrade, and on THIS cluster the references already point
+# at the dev registry before the upgrade starts - so "unchanged" is the
+# correct, passing outcome, and that assertion would fail for the wrong
+# reason. The four assertions below are state assertions: each names what
+# must be true on the upgraded cluster.
+env:
+  E2E_DEMO_VERSION: "v2.18.1-dev"
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+
+steps:
+  - group: 1 - the cluster you supplied (below the target version, change-set already on it)
+  - use_existing_cluster
+  - record_nodes:
+      key: nodes_before_upgrade
+
+  - group: 2 - nkp upgrade kommander, to a build carrying the same three branches
+  - upgrade_kommander:
+      to_version: "${E2E_DEMO_VERSION}"
+      applications_repository: "${NKP_REPOS_DIR}/kommander-applications"
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 3 - the re-render kept every change
+  - assert_change_running:
+      repo: kommander
+  # The marker is logged once, at controller startup. On a cluster that has
+  # been running the change for days the pod is old and that line has rotated
+  # out of the retained log (live-caught 2026-09-07: 5-day-old pod, 0
+  # restarts, still on the change - the upgrade did not even replace it).
+  # Restarting the controller makes the line observable again AND proves the
+  # image survives a restart after the upgrade re-render.
+  - restart_workload:
+      target: deployment/kommander-appmanagement
+      namespace: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+
+  - group: 4 - containment - a kommander upgrade must not touch the node layer
+  - assert_nodes_unchanged:
+      was: nodes_before_upgrade

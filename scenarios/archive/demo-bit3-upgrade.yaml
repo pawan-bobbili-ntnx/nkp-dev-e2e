@@ -1,0 +1,54 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# RECORDING BIT 3 of 3 - against the cluster from bits 1 and 2.
+#   E2E_KUBECONFIG=<path from bit 1> ./run_e2e.py demo-bit3-upgrade --keep
+#
+# KNOWN ISSUE 2026-09-02: `nkp upgrade kommander` fails here after ~40 min with
+#   "timed out waiting for platform apps upgrade to complete"
+# waiting for kommander 0.18.0->0.18.1 and kommander-ui 17.234.30->17.234.32 to
+# move. Not root-caused: the same move succeeded in 4m23s on 2026-09-01 with an
+# identical CLI binary, branch and template. Recorded separately so a failure
+# here costs one take, not the whole demo.
+name: demo-bit3-upgrade
+description: Recording bit 3 - upgrade to a custom build carrying a three-repo change-set
+expected_minutes: 25
+
+env:
+  E2E_DEMO_VERSION: "v2.18.1-dev"
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+
+steps:
+  - group: the cluster from bits 1 and 2
+  - use_existing_cluster
+
+  - group: 3 - upgrade to custom build
+  - upgrade_kommander:
+      to_version: "${E2E_DEMO_VERSION}"
+      applications_repository: "${NKP_REPOS_DIR}/kommander-applications"
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 4 - every change is visible on the upgraded cluster
+  - assert_change_running:
+      repo: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_chart_refs_changed:
+      app: istio-helm
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "upgraded - every change visible"

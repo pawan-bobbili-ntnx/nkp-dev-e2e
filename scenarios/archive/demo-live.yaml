@@ -1,0 +1,90 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE RECORDING SCENARIO. A real cluster, real apps, real cross-repo change
+# delivery - with three pauses to show the NKP dashboard.
+#
+#   ./run_e2e.py demo-live --keep
+#
+# It differs from demo-full-loop in one way: the change-set is delivered with
+# `deliver_changes` instead of `upgrade_kommander`. Same machinery, same
+# content-addressed tags, same four assertions - it just does not invoke
+# `nkp upgrade kommander`, which since 2026-09-02 stalls for 40 minutes waiting
+# for platform apps to move (kommander 0.18.0->0.18.1) and then fails. That is
+# an unresolved CLI issue, not a framework one, and it is not worth a recording.
+name: demo-live
+description: Live demo - 2.18 cluster, istio-helm with an override, then a three-repo change delivered onto it
+expected_minutes: 35
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: 1 - a 2.18 cluster, two nodes
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+  - pause:
+      message: "2.18 cluster is up - open the NKP dashboard now"
+
+  - group: 2 - istio-helm, enabled with a config override like the UI
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "istio-helm is running with the override - show it in the dashboard"
+
+  - group: 3 - one change-set from three repos, onto the running cluster
+  # The baseline `assert_chart_refs_changed` measures against. `upgrade_kommander`
+  # takes this snapshot itself (_autorecord_upgrade_baseline); `deliver_changes`
+  # does not, so a scenario that delivers instead of upgrading has to take it -
+  # otherwise the assertion fails with "needs a prior record_chart_refs" AFTER
+  # the change has already landed, which reads like a delivery failure.
+  - record_chart_refs
+  - deliver_changes:
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 4 - every change is visible on the cluster
+  - assert_change_running:
+      repo: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_chart_refs_changed:
+      app: istio-helm
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+  - pause:
+      message: "all three repos' changes are live - show the dashboard"

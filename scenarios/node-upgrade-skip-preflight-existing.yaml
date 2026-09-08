@@ -1,0 +1,36 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: node-upgrade-skip-preflight-existing
+description: node-upgrade-skip-preflight against a supplied below-version cluster (E2E_KUBECONFIG) - the roll and its assertions without the 36-minute build
+expected_minutes: 30
+
+env:
+  E2E_SKIP: "InfraVMImage"
+
+steps:
+  - group: the cluster you supplied (must be BELOW the CLI's kubernetes version)
+  - use_existing_cluster
+  - record_nodes:
+      key: nodes_before
+  - record_platform_version
+
+  - group: roll the nodes, skipping a named preflight
+  # vm_image is REQUIRED by the CLI for a roll (flag group vm-image |
+  # control-plane-vm-image) - live-caught 2026-09-07, attempt 3 exited in 3s.
+  - upgrade_nodes:
+      vm_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      skip_preflight: ["${E2E_SKIP}"]
+      timeout: 45m
+
+  - group: the skip reached the object CAREN reads, and the roll happened
+  - assert_preflight_skipped:
+      checks: ["${E2E_SKIP}"]
+  - assert_nodes_upgraded:
+      count: 2
+  - wait_pods_healthy:
+      namespace: kube-system
+
+  - group: CONTAINMENT - a node roll must not move the platform
+  - assert_platform_version_unchanged
+

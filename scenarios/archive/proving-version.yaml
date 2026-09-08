@@ -1,0 +1,122 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: proving-version
+description: istio-helm on an attached workload cluster only; the change-set moves its VERSION, and upgrade_workspace applies it
+expected_minutes: 100
+
+# What this exists to settle, after 2026-09-02 proved the negative:
+#
+#   A change that keeps an app's VERSION pinned and swaps the chart behind it
+#   reaches an attached cluster on its own, through flux federation. `nkp
+#   upgrade workspace` moves app VERSIONS, so it had nothing to do and the
+#   scenario that called it was asserting a no-op.
+#
+# So this one gives it a real version to move. The change-set publishes
+# istio-helm 1.25.1 (kommander-applications@pawan/e2e-demo adds the directory;
+# the framework publishes the gateway chart tag it asks for).
+#
+# istio-helm is deployed ONLY on the workload cluster, at 1.25.0.
+#
+# An earlier draft tried to deploy it unpinned so the workspace upgrade would
+# have a free hand. Not possible: deploy_app needs `version:` to build a valid
+# appRef, and it writes clusterConfigOverrides[].appVersion regardless. So the
+# question this settles is the strict one - can `upgrade workspace` move an
+# EXPLICIT per-cluster pin, which version_selector.go:39-60 says is what
+# actually decides the effective version?
+#
+# Every assertion reads the MANAGEMENT cluster: AppDeployment effective version
+# and AppDeploymentInstance convergence both describe the attached cluster from
+# here, so there is no kubeconfig switching.
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_DEMO_VERSION: "v2.18.1-dev"
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+  E2E_APP_FROM: "1.25.0"
+  E2E_APP_TO: "1.25.1"
+
+steps:
+  - group: 1 - a 2.18 management cluster
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+
+  - group: 2 - day-2, attach a single-node workload cluster
+  - create_workload_cluster:
+      control_plane: 1
+      workers: 0
+      control_plane_vcpus: 12
+      control_plane_memory: 40
+
+  - group: 3 - istio-helm on the WORKLOAD cluster only, at 1.25.0
+  # kube-prometheus-stack first: istio-helm's metadata declares it a
+  # requiredDependency, and the dependency has to be in THIS workspace.
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: "@workload"
+      name: kube-prometheus-stack
+      timeout: 35m
+  # `version:` is REQUIRED. Live-caught 2026-09-02: omitting it builds
+  # appRef.name "istio-helm", but ClusterApps are named "istio-helm-1.25.0", so
+  # the AppDeployment points at an object that does not exist and sits at
+  # observedGeneration -1 forever. It pins appVersion 1.25.0 anyway, so there
+  # is no "unpinned" deploy to be had - which makes this the stricter test:
+  # can upgrade_workspace move an EXPLICIT per-cluster pin?
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_FROM}"
+      workspace: "@workload"
+      timeout: 35m
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_app_on_cluster:
+      app: istio-helm
+      timeout: 40m
+  - assert_app_effective_version:
+      app: istio-helm
+      expected: "${E2E_APP_FROM}"
+
+  - group: 4 - the change-set publishes istio-helm 1.25.1
+  - upgrade_kommander:
+      to_version: "${E2E_DEMO_VERSION}"
+      applications_repository: "${NKP_REPOS_DIR}/kommander-applications"
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 5 - the platform moved, but the workload app has NOT
+  - assert_change_running:
+      repo: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_app_effective_version:
+      app: istio-helm
+      expected: "${E2E_APP_FROM}"
+      timeout: 2m
+
+  - group: 6 - step 2 of the customer order - nkp upgrade workspace
+  - upgrade_workspace
+
+  - group: 7 - and now the workload app is on 1.25.1
+  - assert_app_effective_version:
+      app: istio-helm
+      expected: "${E2E_APP_TO}"
+      timeout: 25m
+  - assert_app_on_cluster:
+      app: istio-helm
+      timeout: 25m
+
+  - delete_workload_cluster

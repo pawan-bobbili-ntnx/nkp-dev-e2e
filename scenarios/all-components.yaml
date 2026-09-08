@@ -1,0 +1,73 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: all-components
+description: Changes in CLI + controller + charts, one cluster, every route asserted
+expected_minutes: 110
+
+env:
+  E2E_APP: istio
+  E2E_APP_VERSION: "1.23.6"
+
+steps:
+  - group: cluster for the full change-set (CLI built from branch on create)
+  - create_cluster:
+      control_plane: 1
+      workers: 3
+      changes:
+        - "konvoy2@${E2E_KONVOY2_REF:-ef130b98}"
+        - "kommander@${E2E_KOMMANDER_REF:-7efd9db8}"
+        - "kommander-applications@${E2E_KAPPS_REF:-dab2da0d}"
+      machine_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      kubernetes_version: "1.35.2"
+  - wait_reconciled:
+      timeout: 10m
+
+  - group: the cluster runs YOUR kommander controller build
+  - assert_change_running:
+      repo: kommander
+      strict: true
+  - wait_pods_healthy:
+      namespace: kommander
+      timeout: 10m
+
+  - group: istio from YOUR kommander-applications branch, with an override
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - wait_app_deployed:
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: "${E2E_APP}"
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_values: |
+        istioOperator:
+          components:
+            ingressGateways:
+            - enabled: true
+              name: istio-ingressgateway
+              k8s:
+                hpaSpec:
+                  minReplicas: 1
+  - assert_app_config_applied
+
+  - group: chart change AND override both live in the rendered workload
+  - assert_jsonpath:
+      kind: deployment
+      name: istiod
+      namespace: istio-system
+      path: '{.spec.template.metadata.annotations.demo\.nkp\.nutanix\.com/e2e-pipeline}'
+      equals: "true"
+      timeout: 20m
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-ingressgateway
+      namespace: istio-system
+      path: "{.spec.minReplicas}"
+      equals: "1"
+      timeout: 10m
+
+  - delete_app

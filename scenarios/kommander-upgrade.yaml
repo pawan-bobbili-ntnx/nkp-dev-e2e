@@ -1,0 +1,40 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: kommander-upgrade
+description: A kommander controller change - upgrade only the platform, prove the change survives it and that nodes never moved
+expected_minutes: 45
+
+env:
+  E2E_GA_VERSION: "v2.17.0"
+  E2E_GA_IMAGE: nkp-rocky-9.6-release-cis-1.34.1-20251206060914.qcow2
+  E2E_CHANGE: kommander@7efd9db8
+  E2E_TARGET_VERSION: ""
+
+steps:
+  - group: previous-release baseline (built here; 2.17 claim does not work yet)
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_GA_VERSION}"
+      machine_image: "${E2E_GA_IMAGE}"
+  - record_nodes:
+      key: nodes_before_upgrade
+
+  - group: put the developer's kommander change on the GA cluster
+  - deliver_changes:
+      changes:
+        - "${E2E_CHANGE}"
+  - assert_change_running:
+      repo: kommander
+      timeout: 15m
+
+  - group: the customer's step 1, and only step 1
+  - upgrade_kommander:
+      to_version: "${E2E_TARGET_VERSION}"
+
+  - group: CONTAINMENT - a controller change never touched the node layer
+  - assert_nodes_unchanged:
+      was: nodes_before_upgrade

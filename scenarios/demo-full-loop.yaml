@@ -1,0 +1,78 @@
+name: demo-full-loop
+description: 2.18 baseline with istio app, then upgrade to custom build carrying chart, controller changes
+expected_minutes: 75
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_DEMO_VERSION: "v2.18.1-dev"
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: 1 - a 2.18 cluster, two nodes
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+  - pause:
+      message: "2.18 cluster is up"
+
+  - group: 2 - istio-helm, enabled with a config override like the UI
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "istio running with the override"
+
+  - group: 3 - upgrade to custom build
+  - upgrade_kommander:
+      to_version: "${E2E_DEMO_VERSION}"
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 4 - every change is visible on the upgraded cluster
+  - assert_change_running:
+      repo: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_chart_refs_changed:
+      app: istio-helm
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "upgraded"

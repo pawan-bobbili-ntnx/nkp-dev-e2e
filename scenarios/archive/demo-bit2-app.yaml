@@ -1,0 +1,40 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# RECORDING BIT 2 of 3 - against the cluster bit 1 left running.
+#   E2E_KUBECONFIG=<path from bit 1> ./run_e2e.py demo-bit2-app --keep
+# Re-runnable: delete_app at the end puts the cluster back, so a bad take
+# costs one re-run, not a new cluster.
+name: demo-bit2-app
+description: Recording bit 2 - istio-helm enabled with a config override, like the UI
+expected_minutes: 12
+
+env:
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: the cluster from bit 1
+  - use_existing_cluster
+
+  - group: 2 - istio-helm, enabled with a config override like the UI
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "istio-helm running with the override"

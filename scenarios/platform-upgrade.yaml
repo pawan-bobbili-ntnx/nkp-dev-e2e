@@ -1,0 +1,47 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: platform-upgrade
+description: Previous-release baseline upgraded by the CLI under test - the full-platform blast radius
+expected_minutes: 60
+
+env:
+  E2E_GA_VERSION: "v2.17.0"
+  E2E_GA_IMAGE: nkp-rocky-9.6-release-cis-1.34.1-20251206060914.qcow2
+  E2E_TARGET_VERSION: ""
+  E2E_CHANGE: ""
+  E2E_APP_VERSION: "6.0.3"
+
+steps:
+  - group: previous-release baseline (built here; 2.17 claim does not work yet)
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_GA_VERSION}"
+      machine_image: "${E2E_GA_IMAGE}"
+
+  - group: a user application, deployed before the upgrade
+  - deploy_app:
+      app: logging-operator
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+  - wait_app_deployed
+  - assert_helmrelease_ready
+
+  - group: upgrade with the CLI under test
+  - upgrade_kommander:
+      to_version: "${E2E_TARGET_VERSION}"
+      changes:
+        - "${E2E_CHANGE}"
+
+  - group: the application survived the upgrade
+  - assert_app_instances:
+      app: logging-operator
+  - assert_helmrelease_ready
+  - assert_app_workload_running
+
+cleanup:
+  - delete_app
+  - finish_cluster

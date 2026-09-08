@@ -1,0 +1,56 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: node-upgrade-skip-preflight
+description: konvoy2 --skip-preflight-checks is honoured by a node roll - the annotation CAREN reads is written, and the roll still completes
+expected_minutes: 60
+
+# The six-blocker family (NCN-113929, 114121, 116017, 116440, 116635, 117277 -
+# 2026-04-29 to 2026-08-27, one still open): the CLI accepted
+# --skip-preflight-checks and did not write it where it matters. The flag is
+# not a CLI-side switch; konvoy2 writes the list onto the CAPI Cluster's
+# preflight.cluster.caren.nutanix.com/skip annotation and CAREN's preflight
+# webhook honours THAT. So the assertion reads the annotation, before the roll
+# is even allowed to start, and again after it completes.
+#
+# Needs a baseline BELOW the CLI's kubernetes version (a GA cluster): a node
+# roll no-ops when the version already matches. E2E_BASE_NKP_VERSION picks it.
+env:
+  E2E_BASE_NKP_VERSION: "v2.17.0"
+  E2E_SKIP: "InfraVMImage"
+
+steps:
+  - group: a GA cluster below the CLI under test
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_NKP_VERSION}"
+      machine_image: nkp-rocky-9.6-release-cis-1.34.1-20251206060914.qcow2
+  - record_nodes:
+      key: nodes_before
+  - record_platform_version
+
+  - group: roll the nodes, skipping a named preflight
+  # vm_image is REQUIRED by the CLI for a roll (flag group vm-image |
+  # control-plane-vm-image) - live-caught 2026-09-07, attempt 3 exited in 3s.
+  - upgrade_nodes:
+      vm_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      skip_preflight: ["${E2E_SKIP}"]
+      timeout: 45m
+
+  - group: the skip reached the object CAREN reads, and the roll happened
+  - assert_preflight_skipped:
+      checks: ["${E2E_SKIP}"]
+  - assert_nodes_upgraded:
+      count: 2
+  - wait_pods_healthy:
+      namespace: kube-system
+
+  - group: CONTAINMENT - a node roll must not move the platform
+  - assert_platform_version_unchanged
+
+cleanup:
+  - finish_cluster
+  - assert_no_leftover_vms

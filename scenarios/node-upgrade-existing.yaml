@@ -1,0 +1,32 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: node-upgrade-existing
+description: Row 4 against a supplied below-version cluster - roll the nodes to the CLI's kubernetes and prove the cluster survives
+expected_minutes: 40
+
+env:
+  E2E_NEW_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_CLUSTER_NS: default
+
+steps:
+  - group: the cluster you supplied (must be BELOW the CLI's kubernetes)
+  - use_existing_cluster
+  - record_platform_version
+
+  - group: roll the nodes with the build under test
+  - upgrade_nodes:
+      vm_image: "${E2E_NEW_IMAGE}"
+      namespace: "${E2E_CLUSTER_NS}"
+
+  - group: new nodes, new kubernetes, cluster still whole
+  - assert_nodes_upgraded:
+      count: 2
+  - wait_pods_healthy:
+      namespace: kube-system
+      timeout: 20m
+  - assert_api_reachable
+  - wait_reconciled
+
+  - group: the platform was NOT dragged along by a node roll
+  - assert_platform_version_unchanged

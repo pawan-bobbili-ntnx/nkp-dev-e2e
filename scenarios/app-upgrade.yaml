@@ -1,0 +1,53 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: app-upgrade
+description: BROKEN PREMISE - see SCENARIO-REFERENCE; a release branch carries one version per app, so this pin has nowhere to move
+expected_minutes: 40
+
+env:
+  E2E_APP: logging-operator
+  E2E_APP_FROM_VERSION: "6.4.0"
+  E2E_APP_TO_VERSION: "6.4.1"
+
+steps:
+  - group: a cluster for this change-set (claim)
+  - create_cluster:
+      control_plane: 1
+      workers: 3
+  - wait_reconciled:
+      timeout: 10m
+
+  - group: install the app at the starting version, like a customer
+  - deploy_app:
+      app: "${E2E_APP}"
+      version: "${E2E_APP_FROM_VERSION}"
+      workspace: kommander-workspace
+  - wait_app_deployed
+  - assert_app_effective_version:
+      app: "${E2E_APP}"
+      expected: "${E2E_APP_FROM_VERSION}"
+      timeout: 10m
+  - assert_app_instances:
+      app: "${E2E_APP}"
+      timeout: 10m
+  - record_app_version:
+      app: "${E2E_APP}"
+
+  - group: move the per-cluster pin - the only way a platform app upgrades
+  - set_app_version_pin:
+      app: "${E2E_APP}"
+      version: "${E2E_APP_TO_VERSION}"
+
+  - group: the EFFECTIVE version moved on every selected cluster
+  - assert_app_effective_version:
+      app: "${E2E_APP}"
+      expected: "${E2E_APP_TO_VERSION}"
+      timeout: 20m
+  - assert_app_instances:
+      app: "${E2E_APP}"
+      timeout: 10m
+  - assert_helmrelease_ready
+  - assert_app_workload_running
+
+  - delete_app

@@ -1,0 +1,30 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: ga-baseline
+description: Build and freeze a previous-release cluster - the baseline every upgrade scenario starts from
+expected_minutes: 120
+
+env:
+  E2E_GA_VERSION: "v2.17.0"
+  E2E_GA_IMAGE: nkp-rocky-9.6-release-cis-1.34.1-20251206060914.qcow2
+
+steps:
+  - group: the last GA release, installed exactly as a customer would
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_GA_VERSION}"
+      machine_image: "${E2E_GA_IMAGE}"
+
+  - group: only freeze a baseline that is genuinely healthy
+  - wait_reconciled
+  - wait_pods_healthy:
+      namespace: kommander
+      timeout: 30m
+  - assert_all_helmreleases_ready
+  - assert_api_reachable
+  - record_platform_version:
+      key: ga_version

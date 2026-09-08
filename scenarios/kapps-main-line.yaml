@@ -1,0 +1,58 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: kapps-main-line
+description: A kommander@<main-based ref> whose commit changes application content under kommander-applications/ is delivered from the subtree and observed on the cluster
+expected_minutes: 65
+
+# On kommander main the applications tree is the kommander-applications/
+# directory inside the repository. This proves the framework reads it from
+# there: the change-set names ONE repo, kommander, and the commit touches only
+# kommander-applications/applications/istio-helm/1.25.0/metadata.yaml. The
+# framework must (a) detect the subtree, (b) build no image for a content-only
+# commit, (c) sync the app directory into the cluster's git, and (d) the
+# ClusterApp on the cluster must carry the marker. The version assertion reads
+# the same tree at the same commit: 17.319.4 exists only on main.
+#
+#   E2E_KAPPS_DIR=<worktree>/kommander-applications ./run_e2e.py kapps-main-line
+env:
+  E2E_MAIN_REF: "pawan/e2e-demo-main"
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: 1 - a 2.18 cluster with istio-helm enabled
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "v2.18.0"
+      machine_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      bin_path: "${NKP_BIN}"
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+
+  - group: 2 - deliver application content from the kommander main-line subtree
+  - deliver_changes:
+      changes:
+        - "kommander@${E2E_MAIN_REF}"
+
+  - group: 3 - the content is on the cluster, and it came from the subtree
+  - assert_app_metadata:
+      app: istio-helm
+      contains: "[e2e-demo-main]"
+      timeout: 15m
+  - assert_kapps_app_versions:
+      apps:
+        kommander-ui: "17.319.4"
+
+cleanup:
+  - finish_cluster
+  - assert_no_leftover_vms

@@ -1,0 +1,33 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: node-upgrade
+description: konvoy2/CAREN change - roll a GA cluster's nodes to the new kubernetes and prove it stabilises
+expected_minutes: 45
+
+steps:
+  - group: previous-release cluster (built here; 2.17 claim does not work yet)
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "v2.17.0"
+      machine_image: nkp-rocky-9.6-release-cis-1.34.1-20251206060914.qcow2
+  - record_platform_version
+
+  - group: roll the nodes with the build under test
+  - upgrade_nodes:
+      vm_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+
+  - group: new nodes, new kubernetes, stable cluster
+  - assert_nodes_upgraded:
+      count: 2
+  - wait_pods_healthy:
+      namespace: kube-system
+      timeout: 20m
+  - assert_api_reachable
+  - wait_reconciled
+
+  - group: CONTAINMENT - a node roll must NOT move the platform
+  - assert_platform_version_unchanged

@@ -1,0 +1,57 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: workload-attach
+description: Mgmt cluster (auto claim-or-create), day-2 workload attach, app + override verified on it
+expected_minutes: 75
+
+steps:
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      machine_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      kubernetes_version: "1.35.2"
+  - wait_reconciled:
+      timeout: 10m
+
+  - group: day-2 - create and attach a single-node workload cluster
+  - create_workload_cluster:
+      control_plane: 1
+      workers: 0
+      control_plane_vcpus: 8
+      control_plane_memory: 32
+
+  - group: deploy to the workload cluster's workspace, like the UI
+  - deploy_app:
+      app: logging-operator
+      version: 6.4.0
+      workspace: "@workload"
+      config_values: |
+        resources:
+          requests:
+            cpu: 100m
+            memory: 192Mi
+
+  - group: the app was ENABLED on the cluster, before asking what it renders
+  - assert_app_instances:
+      app: logging-operator
+      timeout: 10m
+
+  - group: the app and the override are live ON the workload cluster
+  - switch_cluster:
+      to: workload
+  - assert_jsonpath:
+      kind: deployment
+      name: logging-operator
+      path: "{.spec.template.spec.containers[0].resources.requests.memory}"
+      equals: "192Mi"
+      timeout: 20m
+  - switch_cluster:
+      to: management
+
+  - switch_cluster:
+      to: management
+  - delete_app
+  - delete_workload_cluster

@@ -1,0 +1,73 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: developer-flow
+description: Branches in - cluster running your build out; istio + override proven
+expected_minutes: 45
+
+env:
+  E2E_APP: istio
+  E2E_APP_VERSION: "1.23.6"
+
+steps:
+  - group: a cluster for this change-set (claim if frozen, create+freeze if first)
+  - create_cluster:
+      control_plane: 1
+      workers: 3
+      changes:
+        - "kommander@${E2E_KOMMANDER_REF:-7efd9db8}"
+      machine_image: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+      kubernetes_version: "1.35.2"
+  - wait_reconciled:
+      timeout: 10m
+
+  - group: the cluster runs YOUR kommander build
+  - assert_change_running:
+      repo: kommander
+  - wait_pods_healthy:
+      namespace: kommander
+      timeout: 10m
+  # uncomment to stop here and take the cluster - a pause waits for a human,
+  # so it must stay commented for unattended suite runs
+  # - pause:
+  #     message: "cluster ready, running your build - inspect at will"
+  #     timeout: 30m
+
+  - group: enable istio in the workspace with a config override, like the UI
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - wait_app_deployed:
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: "${E2E_APP}"
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_values: |
+        istioOperator:
+          components:
+            ingressGateways:
+            - enabled: true
+              name: istio-ingressgateway
+              k8s:
+                hpaSpec:
+                  minReplicas: 1
+  - assert_app_config_applied
+
+  - group: the override took effect in the cluster
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-ingressgateway
+      namespace: istio-system
+      path: "{.spec.minReplicas}"
+      equals: "1"
+      timeout: 25m
+  # uncomment to stop here and take the cluster - a pause waits for a human,
+  # so it must stay commented for unattended suite runs
+  # - pause:
+  #     message: "istio + override verified - inspect at will"
+  #     timeout: 30m
+
+  - delete_app

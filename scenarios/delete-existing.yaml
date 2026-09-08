@@ -1,0 +1,16 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: delete-existing
+description: Tear down a supplied cluster the framework created (E2E_KUBECONFIG) with the CLI that built it, and prove no VM is left
+expected_minutes: 12
+
+# For a run that was interrupted before its own cleanup could run. Point
+# NKP_BIN at the CLI version that created the cluster (a 2.17 cluster is
+# deleted with the 2.17 CLI). Never for a cluster somebody else owns.
+steps:
+  - group: the cluster you supplied
+  - use_existing_cluster
+  - group: delete it, and prove Prism Central agrees
+  - delete_cluster
+  - assert_no_leftover_vms

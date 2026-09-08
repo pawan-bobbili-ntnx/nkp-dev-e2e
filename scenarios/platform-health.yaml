@@ -1,0 +1,29 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: platform-health
+description: Two minutes against any existing management cluster - the four checks whose absence cost hours on 2026-09-07
+expected_minutes: 3
+
+# Each assertion here corresponds to a real, expensive miss:
+#   pins that do not resolve   -> three 40-minute upgrade timeouts
+#   an orphaned federated member -> a frozen template that poisoned every claim
+#   a dashboard that does not serve -> an hour spent on the network instead of the cluster
+# Run it before an upgrade, after one, or whenever a cluster "looks fine".
+#   E2E_KUBECONFIG=<path> ./run_e2e.py platform-health
+env:
+  E2E_UI_VERSION: "17.234.34"
+
+steps:
+  - group: the cluster you supplied
+  - use_existing_cluster
+
+  - group: the platform is consistent with itself
+  - assert_app_pins_resolve
+  - assert_kapps_app_versions:
+      apps:
+        kommander-ui: "${E2E_UI_VERSION}"
+  - assert_federation_healthy
+
+  - group: and the customer can reach it
+  - assert_dashboard_serves

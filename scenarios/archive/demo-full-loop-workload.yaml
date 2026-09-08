@@ -1,0 +1,153 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: demo-full-loop-workload
+description: Management + attached workload cluster, istio-helm on both; one upgrade reaches both
+expected_minutes: 110
+
+# The point this scenario exists to make: ONE upgrade, carrying a change-set
+# from three repos, reaches BOTH the management cluster and an attached
+# workload cluster.
+#
+# Proven live 2026-09-02, after an experiment that expected the opposite: the
+# workload cluster already carried the change before `nkp upgrade workspace`
+# was called. The k-apps change repoints the gateway's OCIRepository, that
+# content federates to the attached cluster, and its own flux pulls the new
+# chart. `upgrade workspace` moves app VERSIONS; this change keeps istio-helm
+# pinned at 1.25.0 and swaps the chart behind it, so the workspace verb has
+# nothing to do. Calling it here and then claiming the result would be
+# asserting a step that did nothing.
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_DEMO_VERSION: "v2.18.1-dev"
+  E2E_DEMO_BRANCH: "pawan/e2e-demo"
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: 1 - a 2.18 management cluster
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+  - pause:
+      message: "2.18 management cluster is up"
+
+  - group: 2 - istio-helm on the management cluster, with a config override
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"
+  - pause:
+      message: "istio-helm running on the management cluster"
+
+  - group: 3 - day-2, attach a single-node workload cluster
+  - create_workload_cluster:
+      control_plane: 1
+      workers: 0
+      control_plane_vcpus: 12
+      control_plane_memory: 40
+  - pause:
+      message: "workload cluster attached"
+
+  - group: 4 - istio-helm on the workload cluster's own workspace
+  # istio-helm's metadata declares requiredDependencies: [kube-prometheus-stack],
+  # so the dependency has to be enabled in THIS workspace, not just the
+  # management one - otherwise the AppDeployment never becomes ready.
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: "@workload"
+      name: kube-prometheus-stack
+      timeout: 35m
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: "@workload"
+      timeout: 35m
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_app_instances:
+      app: istio-helm
+      min_count: 2
+  - assert_app_on_cluster:
+      app: kube-prometheus-stack
+      timeout: 40m
+  - assert_app_on_cluster:
+      app: istio-helm
+      timeout: 40m
+  - pause:
+      message: "istio-helm now running on BOTH clusters"
+
+  - group: 5 - upgrade the management platform, carrying the change-set
+  - upgrade_kommander:
+      to_version: "${E2E_DEMO_VERSION}"
+      applications_repository: "${NKP_REPOS_DIR}/kommander-applications"
+      changes:
+        - "kommander@${E2E_DEMO_BRANCH}"
+        - "kommander-applications@${E2E_DEMO_BRANCH}"
+        - "charts@${E2E_DEMO_BRANCH}"
+
+  - group: 6 - the change is live on the management cluster
+  - assert_change_running:
+      repo: kommander
+  - assert_controller_log:
+      deployment: kommander-appmanagement
+      contains: "e2e-demo marker"
+  - assert_chart_refs_changed:
+      app: istio-helm
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+
+  - group: 7 - and the SAME change is already live on the attached cluster
+  # Proven live 2026-09-02: the change reaches the workload cluster through
+  # ordinary flux/git federation - the k-apps change repoints the gateway's
+  # OCIRepository, that content federates, and the workload cluster's own flux
+  # pulls the new chart. No second upgrade verb is involved, because the app
+  # VERSION never moves (istio-helm stays 1.25.0); only the chart behind the
+  # pinned version changed. `nkp upgrade workspace` moves VERSIONS, so it has
+  # nothing to do here - a run that called it and then claimed credit would be
+  # asserting a step that did nothing.
+  - switch_cluster:
+      to: workload
+  - assert_jsonpath:
+      kind: deployment
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.metadata.annotations.e2e-demo-chart-source}"
+      equals: "pawan/e2e-demo"
+      timeout: 20m
+  - switch_cluster:
+      to: management
+  - pause:
+      message: "one upgrade - the change is live on BOTH clusters"
+
+  - delete_workload_cluster

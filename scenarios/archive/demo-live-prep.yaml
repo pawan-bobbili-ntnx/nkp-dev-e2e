@@ -1,0 +1,54 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The UNRECORDED half of the live demo. Build the cluster and get istio-helm
+# running on it, so that at recording time a real cluster with a real dashboard
+# already exists and only the interesting half is on camera.
+#
+#   ./run_e2e.py demo-live-prep --keep
+#
+# Then record the second half against the cluster this leaves behind:
+#   ./demo_drive.py
+#
+# No pauses: nothing here is watched.
+name: demo-live-prep
+description: Unrecorded setup - a 2.18 cluster with istio-helm and a config override, left running
+expected_minutes: 30
+
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+  E2E_APP_VERSION: "1.25.0"
+
+steps:
+  - group: 1 - a 2.18 cluster, two nodes
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      worker_vcpus: 16
+      worker_memory: 48
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+
+  - group: 2 - istio-helm, enabled with a config override like the UI
+  - deploy_app:
+      app: kube-prometheus-stack
+      version: "82.13.6"
+      workspace: kommander-workspace
+      name: kube-prometheus-stack
+  - deploy_app:
+      app: istio-helm
+      version: "${E2E_APP_VERSION}"
+      workspace: kommander-workspace
+      config_overrides: istio-helm-config-overrides
+      config_values: |
+        gateway:
+          autoscaling:
+            minReplicas: 1
+  - assert_jsonpath:
+      kind: hpa
+      name: istio-helm-ingressgateway
+      namespace: istio-helm-gateway-ns
+      path: "{.spec.minReplicas}"
+      equals: "1"

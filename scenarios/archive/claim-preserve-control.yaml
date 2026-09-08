@@ -1,0 +1,20 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Why this scenario is shaped this way: docs/SCENARIO-REFERENCE.md
+name: claim-preserve-control
+description: CONTROL - claim a clone on the template's own addresses, so no rewrite happens, and observe whether SSO is clean
+expected_minutes: 15
+
+steps:
+  - group: claim on the template's own VIP and LB - no address rewrite at all
+  - claim_cluster:
+      template: e2e-<user>-workload-attach
+      template_vip: <lb-address>
+      template_lb: <lb-address>
+      preserve_addresses: true
+      timeout: 25m
+  - wait_pods_healthy:
+      namespace: kommander
+      timeout: 20m
+  - assert_all_helmreleases_ready
+  - assert_api_reachable

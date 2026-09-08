@@ -1,0 +1,47 @@
+# Copyright 2026 Nutanix. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE STARTER. Copy this file to begin a scenario of your own:
+#   cp scenarios/example-pass.yaml scenarios/<my-scenario>.yaml
+#   ./check_scenario.py <my-scenario>        # well-formed, before it costs a cluster
+#   ./run_e2e.py <my-scenario>               # live
+#
+# It proves the least a scenario can prove - a cluster comes up, is healthy,
+# and is torn down - using only steps every other scenario also uses. Every
+# key here is explained in docs/SCENARIO-REFERENCE.md; every step is listed by
+# ./run_e2e.py --steps.
+name: example-pass
+description: Starter - a cluster comes up, is healthy, and is torn down; copy this to begin
+expected_minutes: 45
+
+# Values a scenario needs that are not secrets. ${VAR:-default} reads the
+# environment first, so a caller can override without editing the file.
+env:
+  E2E_BASE_VERSION: "v2.18.0"
+  E2E_BASE_IMAGE: nkp-rocky-9.7-release-cis-1.35.2-20260701211849.qcow2
+
+steps:
+  - group: 1 - a cluster for this scenario
+  # claim a frozen template if one matches this shape (~8 min), else create
+  # traditionally (~36 min) - the scenario reads the same either way
+  - require_prism_central
+  - create_cluster:
+      control_plane: 1
+      workers: 1
+      version: "${E2E_BASE_VERSION}"
+      machine_image: "${E2E_BASE_IMAGE}"
+      bin_path: "${NKP_BIN}"
+  - wait_nodes_ready:
+      count: 2
+
+  - group: 2 - it is a working cluster
+  - assert_api_reachable
+  - wait_pods_healthy:
+      namespace: kube-system
+
+# Runs whether the steps passed or failed (unless --keep). finish_cluster knows
+# whether the cluster was claimed, created, or supplied, and does the right
+# thing for each; assert_no_leftover_vms is what keeps the shared PC usable.
+cleanup:
+  - finish_cluster
+  - assert_no_leftover_vms
